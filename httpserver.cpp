@@ -1,11 +1,14 @@
 #include <iostream>
 #include <ostream>
 #include <istream>
+#include <sstream>
 #include <ctime>
 #include <string>
 #include <asio.hpp>
 #include <functional>
 #include <thread>
+#include <random>
+#include <iterator>
 
 using asio::ip::tcp;
 using namespace std::placeholders;
@@ -32,49 +35,122 @@ public:
     return socket;
   }
 
+  int get_randint() {
+    std::random_device dev;
+    std::mt19937 rng(dev());
+    std::uniform_int_distribution<std::mt19937::result_type> distint(1,100); // distribution in range [1, 6]
+    return distint(rng);
+  }
+
+  double get_randfloat(double min = 0.0f, double max = 1.0f) {
+      // Use a modern, well-regarded random number engine
+      std::random_device rd;  // Non-deterministic random number generator
+      std::mt19937 gen(rd());   // Seed the Mersenne Twister engine
+
+      // Create a uniform real distribution for the desired range
+      std::uniform_real_distribution<double> dis(min, max);
+
+      // Generate a random double within the specified range
+      return dis(gen);
+  }
+
+  bool get_randbool() {
+    std::vector<bool> choices{true, false};
+    return choices[get_randint() % 2];
+  }
+
+  // Function to convert C-style double array to JSON string
+  std::string to_json(const double arr[], size_t size) {
+    if (size == 0) {
+      return "[]"; // Empty array
+    }
+
+    std::stringstream ss;
+    ss << "[";
+
+    // Use range-based for loop for cleaner iteration
+    for (std::size_t i = 0; i < size; ++i) {
+      ss << arr[i] << ", ";
+    }
+
+    // Remove the trailing comma and space
+    ss.seekp(-2, std::ios_base::end);
+    ss << "]";
+
+    return ss.str();
+  }
+
 private:
   void afterRead(const std::error_code& ec, std::size_t bytes_transferred) {
     if (ec) {
       return;
     }
 
-    // Prepare response
+    // Parse request to identify the endpoint
+    std::string request_string;
+    std::copy(asio::buffers_begin(request.data()), asio::buffers_end(request.data()),
+              std::back_inserter(request_string));
+
+    std::string method;
+    std::string path;
+    std::stringstream request_stream(request_string);
+
+    // Extract method and path from request
+    std::getline(request_stream, method, ' ');
+    std::getline(request_stream, path, '\n');
+
+    // Prepare response based on the endpoint
     asio::streambuf response;
     std::ostream res_stream(&response);
 
-    std::string time = make_daytime_string();
+    if (path.find("/getvalues") != std::string::npos) {
+      // Handle /getvalueofa endpoint
+      int a = get_randint(); // Replace with your desired value
+      double b = get_randfloat(); // Replace with your desired value
+      bool c = get_randbool();
+      double d[5];
+      for (std::size_t i = 0; i < 5; ++i) {
+        d[i] = get_randfloat();
+      }
 
-    res_stream << "HTTP/1.0 200 OK\r\n"
-            << "Content-Type: text/html; charset=UTF-8\r\n"
-            << "Content-Length: " << time.length() + 206 << "\r\n\r\n"
-            << "<html><head><title>Hello</title>"
-            << "<script>"
-            << "function prettyPrintTime(hours, minutes, seconds) {"
-            << "return (hours.toString().padStart(2, '0') + ':' + minutes.toString().padStart(2, '0') + ':' + seconds.toString().padStart(2, '0'));"
-            << "}"
-            << "function prettyPrintDate(date) {"
-            << "var days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];"
-            << "var months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];"
-            << "var dayOfWeek = days[date.getDay()];"
-            << "var month = months[date.getMonth()];"
-            << "var day = date.getDate();"
-            << "var year = date.getFullYear();"
-            << "return dayOfWeek + ', ' + month + ' ' + day + ', ' + year;"
-            << "}"
-            << "function updateTime() {"
-            << "var currentTime = new Date();"
-            << "var hours = currentTime.getHours();"
-            << "var minutes = currentTime.getMinutes();"
-            << "var seconds = currentTime.getSeconds();"
-            << "document.getElementById('time').innerHTML = prettyPrintTime(hours, minutes, seconds);"
-            << "document.getElementById('date').innerHTML = prettyPrintDate(currentTime);"
-            << "}"
-            << "setInterval(updateTime, 1000);"
-            << "</script>"
-            << "</head><body>"
-            << "<div id='date'></div>"
-            << "<div id='time'></div></body></html>";
+      // Manually construct the JSON string with indentation
+      std::stringstream ss;
+      ss << "{\n";
+      ss << "  \"a\": " << a << ",\n";
+      ss << "  \"b\": " << b << ",\n";
+      ss << "  \"c\": " << (c ? "true" : "false") << ",\n";
+      ss << "  \"d\": " << to_json(d, 5) << "\n";
+      ss << "}";
 
+      // Prepare the HTTP response
+      res_stream << "HTTP/1.0 200 OK\r\n"
+                << "Content-Type: application/json\r\n"
+                << "Content-Length: " << ss.str().length() << "\r\n\r\n"
+                << ss.str();
+    } else {
+      std::string time = make_daytime_string();
+
+      res_stream << "HTTP/1.0 200 OK\r\n"
+              << "Content-Type: text/html; charset=UTF-8\r\n"
+              << "Content-Length: " << time.length() + 206 << "\r\n\r\n"
+              << "<html><head><title>Hello</title>"
+              << "<script>"
+              << "function updateValues() {"
+              << "  var xhr = new XMLHttpRequest();"
+              << "  xhr.open('GET', '/getvalues');"
+              << "  xhr.onload = function() {"
+              << "    if (xhr.status === 200) {"
+              << "      document.getElementById('values').innerHTML = xhr.responseText;"
+              << "    }"
+              << "  };"
+              << "  xhr.send();"
+              << "}"
+              << "setInterval(updateValues, 1000); // Update value every second"
+              << "</script>"
+              << "</head><body>"
+              << "<pre><div id='values'/></pre>"
+              << "</body></html>";
+    }
     // Write response asynchronously
     asio::async_write(socket, response,
                       std::bind(&Request::afterWrite, shared_from_this(), _1, _2));
@@ -107,19 +183,10 @@ public:
   }
 
   void step() {
-    // Measure execution time using std::chrono
-    auto start = std::chrono::high_resolution_clock::now();
-
     // Process any pending events from io_service
     io_service.poll();
     // Schedule another step for next iteration (assuming 80ms RTOS call)
     io_service.post([this] { });
-
-    auto end = std::chrono::high_resolution_clock::now();
-    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
-
-    // Print execution time in microseconds
-    std::cout << "HttpServer::step() execution time: " << duration.count() << " microseconds" << std::endl;
   }
 
 private:
@@ -146,24 +213,7 @@ int main() {
   HttpServer server(8080, io_service);
   server.initialize();
 
-  auto start_time = std::chrono::high_resolution_clock::now();
   while (true) {
     server.step();
-
-    // Calculate time taken by step()
-    auto end_time = std::chrono::high_resolution_clock::now();
-    auto step_duration = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time);
-    start_time = end_time; // Reset start time for next iteration
-
-    // Calculate remaining sleep time for 80ms rate
-    auto target_duration = std::chrono::microseconds(80000);
-    auto sleep_duration = target_duration - step_duration;
-
-    // Ensure sleep duration is non-negative (avoid negative sleep)
-    if (sleep_duration.count() > 0) {
-      using namespace std::chrono_literals;
-      std::this_thread::sleep_until(start_time + sleep_duration);
-    }
-
   }
 }
